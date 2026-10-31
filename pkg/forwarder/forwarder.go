@@ -23,6 +23,9 @@ type Forwarder struct {
 	groupCtx  context.Context
 	group     *errgroup.Group
 	lnCancels map[string]context.CancelFunc
+	// stopped is set once Wait starts waiting for the group, after which
+	// Reconcile must not add goroutines to it.
+	stopped bool
 }
 
 func NewForwarder(ctx context.Context) *Forwarder {
@@ -41,12 +44,19 @@ func NewForwarder(ctx context.Context) *Forwarder {
 
 func (f *Forwarder) Wait() error {
 	<-f.groupCtx.Done()
+	f.mu.Lock()
+	f.stopped = true
+	f.mu.Unlock()
 	return f.group.Wait()
 }
 
 func (f *Forwarder) Reconcile(rules []Rule) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+
+	if f.stopped {
+		return nil
+	}
 
 	slog.Default().Info("reconciling rules", "count", len(rules))
 
